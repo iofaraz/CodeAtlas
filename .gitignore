@@ -1,0 +1,41 @@
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment variables
+.env
+.env.local
+
+# Dataset files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Generated indexes
+indexes/*
+!indexes/lexicon/
+!indexes/forward/
+!indexes/inverted/
+!indexes/barrels/
+!indexes/lexicon/.gitkeep
+!indexes/forward/.gitkeep
+!indexes/inverted/.gitkeep
+!indexes/barrels/.gitkeep
+
+# Frontend
+node_modules/
+.next/
+out/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

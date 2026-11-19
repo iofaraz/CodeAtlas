@@ -1,0 +1,77 @@
+
+# CodeAtlas — Requirements Traceability Matrix
+
+## 1. Purpose
+
+This document tracks the instructor's requirements and
+connects them to CodeAtlas implementation phases.
+
+It will be updated throughout development to verify
+that every required feature is implemented and tested.
+
+## 2. Functional Requirements
+
+| ID | Requirement | Phase | Verification |
+|---|---|---|---|
+| FR-01 | Lexicon implementation | 3 | Term lookup tests |
+| FR-02 | Forward Index | 3 | Document-term mapping tests |
+| FR-03 | Inverted Index | 3 | Term-document mapping tests |
+| FR-04 | File-based index storage | 3 | Inspect saved index files |
+| FR-05 | Barrel partitioning | 4 | Partition retrieval tests |
+| FR-06 | Single-word search | 5 | Search test cases |
+| FR-07 | Multi-word search | 5 | Multi-term query tests |
+| FR-08 | Relevance ranking | 5 | Ranking evaluation |
+| FR-09 | Metadata-based ranking | 5 | Metadata contribution tests |
+| FR-10 | Semantic search | 6 | Similarity evaluation |
+| FR-11 | Trie autocomplete | 7 | Prefix lookup tests |
+| FR-12 | 3–5 suggestions | 7 | Suggestion count tests |
+| FR-13 | Dynamic document addition | 8 | Ingestion tests |
+| FR-14 | JSON input | 8 | JSON ingestion tests |
+| FR-15 | Plain-text input | 8 | Text ingestion tests |
+| FR-16 | Manual document input | 8 | UI submission tests |
+| FR-17 | Non-blocking index updates | 8 | Concurrent search tests |
+| FR-18 | Professional frontend | 9 | UI and integration tests |
+
+## 3. Performance Requirements
+
+| ID | Requirement | Target | Verification |
+|---|---|---|---|
+| PR-01 | Single-word search | Under 500 ms | Latency measurement |
+| PR-02 | Five-word search | Under 1.5 seconds | Latency measurement |
+| PR-03 | Autocomplete | Under 100 ms | Latency measurement |
+| PR-04 | New document indexing | Within 1 minute | Indexing benchmark |
+| PR-05 | RAM below 100,000 documents | At most 2 GB | Memory profiling |
+| PR-06 | RAM above 100,000 documents | At most 4 GB | Memory profiling |
+
+## 4. Dataset Requirements
+
+| ID | Requirement | Verification |
+|---|---|---|
+| DR-01 | At least 45,000 distinct documents | Count processed documents |
+| DR-02 | Median document length at least 100 words | Calculate median |
+| DR-03 | At least two metadata fields contribute to ranking | Inspect ranking implementation and test |
+
+## 5. Development Requirements
+
+| ID | Requirement | Verification |
+|---|---|---|
+| DEV-01 | Core algorithms implemented by the team | Code review |
+| DEV-02 | Indexing structures stored in files | Inspect storage implementation |
+| DEV-03 | GitHub version control | Review repository history |
+| DEV-04 | Complete technical documentation | Documentation review |
+| DEV-05 | Deployment | Verify public application |
+
+## 6. Status Definitions
+
+- Not Started: Work has not begun.
+- In Progress: Implementation is underway.
+- Implemented: Code has been written.
+- Tested: Relevant tests have passed.
+- Complete: Implementation, testing and documentation are complete.
+
+## 7. Current Status
+
+All requirements are currently tracked as Not Started
+or In Progress according to actual project progress.
+
+This document will be updated as development proceeds.
