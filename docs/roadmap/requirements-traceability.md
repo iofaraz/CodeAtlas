@@ -51,6 +51,15 @@ that every required feature is implemented and tested.
 | DR-02 | Median document length at least 100 words | Calculate median |
 | DR-03 | At least two metadata fields contribute to ranking | Inspect ranking implementation and test |
 
+Phase 2 verification:
+- DR-01: **Satisfied** - 50,083 distinct question documents were processed.
+- DR-02: **Interpretation pending** - median title-plus-body tokenizer
+  length is 130 tokens; median whitespace-separated word count is 124
+  words. The whitespace-based result exceeds 100 under that explicit
+  interpretation, but instructor confirmation of the intended counting
+  rule is still required.
+- DR-03: **Pending** - ranking is outside Phase 2 scope.
+
 ## 5. Development Requirements
 
 | ID | Requirement | Verification |
@@ -76,7 +85,7 @@ that every required feature is implemented and tested.
 | Project foundation and repository | Complete |
 | Backend environment and FastAPI | Complete |
 | Initial Document model | Complete |
-| Dataset processing | Not Started |
+| Dataset processing | Complete |
 | Core indexing structures | Not Started |
 | Search and ranking | Not Started |
 | Semantic search | Not Started |

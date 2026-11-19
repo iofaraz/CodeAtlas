@@ -107,6 +107,13 @@ dataset into clean, structured searchable documents.
 - Dataset size and document-length requirements
   are rechecked after preprocessing.
 
+**Phase Status:** Implemented and verified against the full dataset.
+The full run processed 50,083 question documents, and both
+Phase 2 document-count and length measurements were recorded.
+The existing tokenizer median is 130 tokens and the additional
+whitespace-based median is 124 words; the instructor's intended
+word-count definition requires confirmation.
+
 ### Phase 3 — Core Indexing Structures
 
 **Objective:** Implement the three foundational indexing
@@ -431,7 +438,7 @@ functionality.
 | Phase | Status |
 |---|---|
 | Phase 1 — Foundation | Complete |
-| Phase 2 — Preprocessing | Not Started |
+| Phase 2 — Preprocessing | Complete (100-word measurement interpretation pending) |
 | Phase 3 — Core Indexing | Not Started |
 | Phase 4 — Barrels | Not Started |
 | Phase 5 — Search and Ranking | Not Started |
