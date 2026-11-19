@@ -425,11 +425,12 @@ A phase will only be marked complete after:
 Planned functionality must not be described as completed
 functionality.
 
+
 ## 7. Current Project Status
 
 | Phase | Status |
 |---|---|
-| Phase 1 — Foundation | In Progress |
+| Phase 1 — Foundation | Complete |
 | Phase 2 — Preprocessing | Not Started |
 | Phase 3 — Core Indexing | Not Started |
 | Phase 4 — Barrels | Not Started |

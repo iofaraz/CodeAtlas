@@ -71,7 +71,20 @@ that every required feature is implemented and tested.
 
 ## 7. Current Status
 
-All requirements are currently tracked as Not Started
-or In Progress according to actual project progress.
+| Requirement Group | Status |
+|---|---|
+| Project foundation and repository | Complete |
+| Backend environment and FastAPI | Complete |
+| Initial Document model | Complete |
+| Dataset processing | Not Started |
+| Core indexing structures | Not Started |
+| Search and ranking | Not Started |
+| Semantic search | Not Started |
+| Autocomplete | Not Started |
+| Dynamic content addition | Not Started |
+| Frontend | Not Started |
+| Performance verification | Not Started |
+| Deployment | Not Started |
 
-This document will be updated as development proceeds.
+Only requirements that have been implemented and
+verified should be marked Complete.
