@@ -7,6 +7,8 @@ implementation.
 """
 
 from collections import Counter
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence
 from typing import Iterable, Mapping, TypedDict
 
 
@@ -179,6 +181,70 @@ class InvertedIndex:
             self.add_posting(term_id, doc_id, title_tf, body_tf, tag_tf)
 
         self._document_ids.add(doc_id)
+
+    def add_forward_record(self, record: object) -> None:
+        """Adapt one Forward Index record and add it to the inverted index."""
+        if not isinstance(record, MappingABC):
+            raise ValueError("record must be a mapping")
+
+        if "doc_id" not in record:
+            raise ValueError("Forward Index record is missing doc_id")
+        doc_id = record["doc_id"]
+        self._validate_doc_id(doc_id)
+
+        if "terms" not in record:
+            raise ValueError("Forward Index record is missing terms")
+        terms = record["terms"]
+        if (
+            not isinstance(terms, Sequence)
+            or isinstance(terms, (str, bytes, bytearray))
+        ):
+            raise ValueError("terms must be a sequence")
+
+        term_frequencies: dict[int, dict[str, int]] = {}
+        previous_term_id = 0
+        seen_term_ids: set[int] = set()
+
+        for term_entry in terms:
+            if not isinstance(term_entry, MappingABC):
+                raise ValueError("each term entry must be a mapping")
+            if "term_id" not in term_entry:
+                raise ValueError("term entry is missing term_id")
+
+            term_id = term_entry["term_id"]
+            self._validate_term_id(term_id)
+            if term_id in seen_term_ids:
+                raise ValueError(
+                    f"duplicate term_id in Forward Index record: {term_id}"
+                )
+            if term_id <= previous_term_id:
+                raise ValueError("Forward Index terms must be sorted by ascending term_id")
+            seen_term_ids.add(term_id)
+            previous_term_id = term_id
+
+            frequencies: dict[str, int] = {}
+            for field_name in ("title_tf", "body_tf", "tag_tf"):
+                if field_name not in term_entry:
+                    raise ValueError(
+                        f"term entry is missing {field_name}"
+                    )
+                value = term_entry[field_name]
+                self._validate_tf(value, field_name)
+                frequencies[field_name] = value
+
+            if (
+                frequencies["title_tf"]
+                + frequencies["body_tf"]
+                + frequencies["tag_tf"]
+                == 0
+            ):
+                raise ValueError(
+                    "Forward Index term entries must have at least one non-zero TF"
+                )
+
+            term_frequencies[term_id] = frequencies
+
+        self.add_document(doc_id, term_frequencies=term_frequencies)
 
     def get_postings(self, term_id: int) -> list[Posting]:
         """Return a copy of postings for a term ID, sorted by document ID."""

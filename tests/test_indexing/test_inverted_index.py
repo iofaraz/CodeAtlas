@@ -152,3 +152,237 @@ def test_get_postings_returns_defensive_copy():
     assert index.get_postings(3) == [
         {"doc_id": 20, "title_tf": 2, "body_tf": 0, "tag_tf": 0}
     ]
+
+
+def test_add_forward_record_creates_postings_and_preserves_tf():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+                {"term_id": 2, "title_tf": 2, "body_tf": 3, "tag_tf": 1},
+            ],
+        }
+    )
+
+    assert index.get_postings(1) == [
+        {"doc_id": 101, "title_tf": 0, "body_tf": 1, "tag_tf": 0}
+    ]
+    assert index.get_postings(2) == [
+        {"doc_id": 101, "title_tf": 2, "body_tf": 3, "tag_tf": 1}
+    ]
+    assert index.get_document_frequency(1) == 1
+    assert index.get_document_frequency(2) == 1
+
+
+def test_multiple_forward_records_have_sorted_postings_and_correct_df():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 205,
+            "terms": [
+                {"term_id": 4, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 4, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+            ],
+        }
+    )
+
+    assert index.get_postings(4) == [
+        {"doc_id": 101, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+        {"doc_id": 205, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+    ]
+    assert index.get_document_frequency(4) == 2
+    assert index.df == {4: 2}
+
+
+@pytest.mark.parametrize("record", [None, [], 1, "record"])
+def test_forward_record_requires_mapping(record):
+    with pytest.raises(ValueError, match="record must be a mapping"):
+        InvertedIndex().add_forward_record(record)
+
+
+def test_forward_record_requires_doc_id():
+    with pytest.raises(ValueError, match="missing doc_id"):
+        InvertedIndex().add_forward_record({"terms": []})
+
+
+@pytest.mark.parametrize("doc_id", [0, -1, 1.5, "101", True])
+def test_forward_record_rejects_invalid_doc_id(doc_id):
+    with pytest.raises(ValueError, match="doc_id"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": doc_id,
+                "terms": [],
+            }
+        )
+
+
+def test_forward_record_requires_terms():
+    with pytest.raises(ValueError, match="missing terms"):
+        InvertedIndex().add_forward_record({"doc_id": 101})
+
+
+@pytest.mark.parametrize("terms", [None, 1, "terms", {}, True])
+def test_forward_record_rejects_invalid_terms_sequence(terms):
+    with pytest.raises(ValueError, match="terms must be a sequence"):
+        InvertedIndex().add_forward_record({"doc_id": 101, "terms": terms})
+
+
+def test_forward_record_rejects_non_mapping_term_entry():
+    with pytest.raises(ValueError, match="term entry must be a mapping"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [1],
+            }
+        )
+
+
+def test_forward_record_requires_term_id():
+    with pytest.raises(ValueError, match="missing term_id"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("term_id", [0, -1, 1.5, "1", True])
+def test_forward_record_rejects_invalid_term_id(term_id):
+    with pytest.raises(ValueError, match="term_id"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {
+                        "term_id": term_id,
+                        "title_tf": 1,
+                        "body_tf": 0,
+                        "tag_tf": 0,
+                    },
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("field_name", ["title_tf", "body_tf", "tag_tf"])
+@pytest.mark.parametrize("value", [-1, 1.5, "2", True])
+def test_forward_record_rejects_invalid_tf(field_name, value):
+    entry = {"term_id": 1, "title_tf": 0, "body_tf": 0, "tag_tf": 0}
+    entry[field_name] = value
+
+    with pytest.raises(ValueError, match="frequency"):
+        InvertedIndex().add_forward_record(
+            {"doc_id": 101, "terms": [entry]}
+        )
+
+
+def test_forward_record_requires_tf_fields():
+    with pytest.raises(ValueError, match="missing title_tf"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"term_id": 1, "body_tf": 1, "tag_tf": 0},
+                ],
+            }
+        )
+
+
+def test_forward_record_rejects_duplicate_term_ids():
+    with pytest.raises(ValueError, match="duplicate term_id"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                    {"term_id": 1, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "terms",
+    [
+        [
+            {"term_id": 2, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        ],
+        [
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            {"term_id": 1, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+        ],
+    ],
+)
+def test_forward_record_requires_sorted_unique_term_ids(terms):
+    with pytest.raises(ValueError):
+        InvertedIndex().add_forward_record({"doc_id": 101, "terms": terms})
+
+
+def test_forward_record_rejects_all_zero_tf_entry():
+    with pytest.raises(ValueError, match="non-zero TF"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"term_id": 1, "title_tf": 0, "body_tf": 0, "tag_tf": 0},
+                ],
+            }
+        )
+
+
+def test_forward_record_is_atomic_when_later_entry_is_invalid():
+    index = InvertedIndex()
+    index.add_posting(9, 50, title_tf=1)
+    index_before = index.get_index()
+    df_before = index.df
+
+    with pytest.raises(ValueError, match="missing body_tf"):
+        index.add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {
+                        "term_id": 1,
+                        "title_tf": 1,
+                        "body_tf": 0,
+                        "tag_tf": 0,
+                    },
+                    {
+                        "term_id": 2,
+                        "title_tf": 0,
+                        "tag_tf": 1,
+                    },
+                ],
+            }
+        )
+
+    assert index.get_index() == index_before
+    assert index.df == df_before
+    assert index.get_postings(1) == []
+
+
+def test_duplicate_forward_document_is_rejected():
+    index = InvertedIndex()
+    record = {
+        "doc_id": 101,
+        "terms": [
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        ],
+    }
+    index.add_forward_record(record)
+
+    with pytest.raises(ValueError, match="already been added"):
+        index.add_forward_record(record)
