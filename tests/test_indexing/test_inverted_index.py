@@ -386,3 +386,218 @@ def test_duplicate_forward_document_is_rejected():
 
     with pytest.raises(ValueError, match="already been added"):
         index.add_forward_record(record)
+
+
+def test_build_from_forward_records_preserves_tf_df_and_sorted_postings():
+    index = InvertedIndex()
+    records = [
+        {
+            "doc_id": 205,
+            "terms": [
+                {"term_id": 2, "title_tf": 1, "body_tf": 0, "tag_tf": 2},
+                {"term_id": 5, "title_tf": 0, "body_tf": 3, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 2, "title_tf": 0, "body_tf": 2, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 150,
+            "terms": [
+                {"term_id": 2, "title_tf": 1, "body_tf": 1, "tag_tf": 0},
+            ],
+        },
+    ]
+
+    index.build_from_forward_records(records)
+
+    assert index.get_postings(2) == [
+        {"doc_id": 101, "title_tf": 0, "body_tf": 2, "tag_tf": 0},
+        {"doc_id": 150, "title_tf": 1, "body_tf": 1, "tag_tf": 0},
+        {"doc_id": 205, "title_tf": 1, "body_tf": 0, "tag_tf": 2},
+    ]
+    assert index.get_postings(5) == [
+        {"doc_id": 205, "title_tf": 0, "body_tf": 3, "tag_tf": 0}
+    ]
+    assert index.get_document_frequency(2) == 3
+    assert index.get_document_frequency(5) == 1
+    assert index.df == {2: 3, 5: 1}
+
+
+def test_build_from_empty_iterable_replaces_index_with_empty_index():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+
+    index.build_from_forward_records([])
+
+    assert index.get_index() == {}
+    assert index.df == {}
+    assert len(index) == 0
+
+
+def test_build_from_forward_records_accepts_generator():
+    records = (
+        {
+            "doc_id": doc_id,
+            "terms": [
+                {"term_id": 3, "title_tf": doc_id, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+        for doc_id in (2, 1)
+    )
+    index = InvertedIndex()
+
+    index.build_from_forward_records(records)
+
+    assert index.get_postings(3) == [
+        {"doc_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        {"doc_id": 2, "title_tf": 2, "body_tf": 0, "tag_tf": 0},
+    ]
+    assert index.get_document_frequency(3) == 2
+
+
+def test_build_from_forward_records_rejects_duplicate_document_ids():
+    record = {
+        "doc_id": 101,
+        "terms": [
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="already been added"):
+        InvertedIndex().build_from_forward_records([record, record])
+
+
+def test_build_from_forward_records_failure_is_atomic():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 50,
+            "terms": [
+                {"term_id": 9, "title_tf": 2, "body_tf": 1, "tag_tf": 0},
+            ],
+        }
+    )
+    index_before = index.get_index()
+    df_before = index.df
+    records = [
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 102,
+            "terms": [
+                {"term_id": 2, "title_tf": 0, "body_tf": 0, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 103,
+            "terms": [
+                {"term_id": 3, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+            ],
+        },
+    ]
+
+    with pytest.raises(ValueError, match="non-zero TF"):
+        index.build_from_forward_records(records)
+
+    assert index.get_index() == index_before
+    assert index.df == df_before
+    assert index.get_postings(1) == []
+    assert index.get_postings(3) == []
+
+
+def test_build_from_forward_records_is_atomic_when_iterator_raises():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 50,
+            "terms": [
+                {"term_id": 9, "title_tf": 2, "body_tf": 1, "tag_tf": 0},
+            ],
+        }
+    )
+    index_before = index.get_index()
+    df_before = index.df
+
+    def records():
+        yield {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+        raise RuntimeError("record iterator failed")
+
+    with pytest.raises(RuntimeError, match="record iterator failed"):
+        index.build_from_forward_records(records())
+
+    assert index.get_index() == index_before
+    assert index.df == df_before
+
+
+def test_build_from_forward_records_rebuilds_instead_of_appending():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 50,
+            "terms": [
+                {"term_id": 9, "title_tf": 2, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+
+    index.build_from_forward_records(
+        [
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"term_id": 1, "title_tf": 0, "body_tf": 4, "tag_tf": 0},
+                ],
+            }
+        ]
+    )
+
+    assert index.get_index() == {
+        1: [{"doc_id": 101, "title_tf": 0, "body_tf": 4, "tag_tf": 0}]
+    }
+    assert index.get_document_frequency(1) == 1
+    assert index.get_postings(9) == []
+
+
+def test_build_from_forward_records_does_not_modify_input_records():
+    records = [
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 2, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 102,
+            "terms": [
+                {"term_id": 1, "title_tf": 0, "body_tf": 1, "tag_tf": 1},
+            ],
+        },
+    ]
+    records_before = [
+        {"doc_id": record["doc_id"], "terms": [dict(term) for term in record["terms"]]}
+        for record in records
+    ]
+
+    InvertedIndex().build_from_forward_records(records)
+
+    assert records == records_before

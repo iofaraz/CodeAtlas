@@ -246,6 +246,19 @@ class InvertedIndex:
 
         self.add_document(doc_id, term_frequencies=term_frequencies)
 
+    def build_from_forward_records(self, records: Iterable[object]) -> None:
+        """Replace the index with postings built from Forward Index records.
+
+        The current index is left unchanged if iteration or record validation
+        fails.
+        """
+        new_index = InvertedIndex()
+        for record in records:
+            new_index.add_forward_record(record)
+
+        self._index = new_index._index
+        self._document_ids = new_index._document_ids
+
     def get_postings(self, term_id: int) -> list[Posting]:
         """Return a copy of postings for a term ID, sorted by document ID."""
         self._validate_term_id(term_id)
