@@ -601,3 +601,371 @@ def test_build_from_forward_records_does_not_modify_input_records():
     InvertedIndex().build_from_forward_records(records)
 
     assert records == records_before
+
+
+def test_valid_index_passes_validate():
+    index = InvertedIndex()
+    index.add_document(
+        101,
+        term_frequencies={
+            1: {"title_tf": 1, "body_tf": 2, "tag_tf": 0},
+            2: {"tag_tf": 3},
+        },
+    )
+
+    assert index.validate() is True
+
+
+def test_empty_index_passes_validate():
+    assert InvertedIndex().validate() is True
+
+
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        (lambda index: index._index.__setitem__(True, []), "term_id"),
+        (lambda index: index._index.__setitem__(1, []), "empty postings"),
+        (
+            lambda index: index._index.__setitem__(
+                1, [{"doc_id": 0, "title_tf": 1, "body_tf": 0, "tag_tf": 0}]
+            ),
+            "doc_id",
+        ),
+        (
+            lambda index: index._index.__setitem__(
+                1, [{"doc_id": 101, "title_tf": -1, "body_tf": 0, "tag_tf": 0}]
+            ),
+            "title_tf",
+        ),
+        (
+            lambda index: index._index.__setitem__(
+                1, [{"doc_id": 101, "title_tf": 0, "body_tf": 0, "tag_tf": 0}]
+            ),
+            "non-zero TF",
+        ),
+    ],
+)
+def test_validate_detects_corrupted_internal_state(corruption, match):
+    index = InvertedIndex()
+    index.add_document(
+        101,
+        term_frequencies={1: {"title_tf": 1, "body_tf": 0, "tag_tf": 0}},
+    )
+    corruption(index)
+
+    with pytest.raises(ValueError, match=match):
+        index.validate()
+
+
+@pytest.mark.parametrize(
+    ("postings", "match"),
+    [
+        (
+            [{"doc_id": 101, "title_tf": True, "body_tf": 0, "tag_tf": 0}],
+            "title_tf",
+        ),
+        (
+            [{"doc_id": 101, "title_tf": 0, "body_tf": True, "tag_tf": 0}],
+            "body_tf",
+        ),
+        (
+            [{"doc_id": 101, "title_tf": 0, "body_tf": 0, "tag_tf": True}],
+            "tag_tf",
+        ),
+        (
+            [
+                {"doc_id": 101, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                {"doc_id": 101, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+            ],
+            "duplicate document ID",
+        ),
+        (
+            [
+                {"doc_id": 102, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                {"doc_id": 101, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+            ],
+            "strictly increasing",
+        ),
+        (
+            [{"doc_id": 101, "title_tf": 1, "body_tf": 0, "tag_tf": 0, "extra": 1}],
+            "unexpected or missing fields",
+        ),
+    ],
+)
+def test_validate_detects_posting_invariants(postings, match):
+    index = InvertedIndex()
+    index._index = {1: postings}
+    index._document_ids = {101, 102}
+
+    with pytest.raises(ValueError, match=match):
+        index.validate()
+
+
+def test_valid_index_matches_forward_records():
+    records = [
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 2, "tag_tf": 0},
+                {"term_id": 2, "title_tf": 0, "body_tf": 0, "tag_tf": 3},
+            ],
+        }
+    ]
+    index = InvertedIndex()
+    index.build_from_forward_records(records)
+
+    assert index.validate_against_forward_records(records) is True
+
+
+def test_validate_against_forward_records_accepts_generator():
+    records = (
+        {
+            "doc_id": doc_id,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+        for doc_id in (101, 102)
+    )
+    index = InvertedIndex()
+    index.build_from_forward_records(
+        [
+            {
+                "doc_id": 101,
+                "terms": [
+                    {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+            {
+                "doc_id": 102,
+                "terms": [
+                    {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+        ]
+    )
+
+    assert index.validate_against_forward_records(records) is True
+
+
+def test_validate_against_forward_records_detects_missing_posting():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="missing posting"):
+        index.validate_against_forward_records(
+            [
+                {
+                    "doc_id": 101,
+                    "terms": [
+                        {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                        {"term_id": 2, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+                    ],
+                }
+            ]
+        )
+
+
+def test_validate_against_forward_records_detects_extra_posting():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                {"term_id": 2, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="extra posting"):
+        index.validate_against_forward_records(
+            [
+                {
+                    "doc_id": 101,
+                    "terms": [
+                        {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                    ],
+                }
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "forward_value", "message"),
+    [
+        ("title_tf", 1, "incorrect title_tf"),
+        ("body_tf", 1, "incorrect body_tf"),
+        ("tag_tf", 1, "incorrect tag_tf"),
+    ],
+)
+def test_validate_against_forward_records_detects_incorrect_field_tf(
+    field_name,
+    forward_value,
+    message,
+):
+    index = InvertedIndex()
+    index.add_posting(
+        1,
+        101,
+        title_tf=2 if field_name == "title_tf" else 0,
+        body_tf=2 if field_name == "body_tf" else 0,
+        tag_tf=2 if field_name == "tag_tf" else 0,
+    )
+    term = {
+        "term_id": 1,
+        "title_tf": 0,
+        "body_tf": 0,
+        "tag_tf": 0,
+    }
+    term[field_name] = forward_value
+
+    with pytest.raises(ValueError, match=message):
+        index.validate_against_forward_records(
+            [{"doc_id": 101, "terms": [term]}]
+        )
+
+
+def test_validate_against_forward_records_detects_missing_document():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="missing document"):
+        index.validate_against_forward_records(
+            [
+                {
+                    "doc_id": 101,
+                    "terms": [
+                        {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                    ],
+                },
+                {
+                    "doc_id": 102,
+                    "terms": [
+                        {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                    ],
+                },
+            ]
+        )
+
+
+def test_validate_against_forward_records_detects_extra_document():
+    index = InvertedIndex()
+    index.add_forward_record(
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+    index.add_forward_record(
+        {
+            "doc_id": 102,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="extra document"):
+        index.validate_against_forward_records(
+            [
+                {
+                    "doc_id": 101,
+                    "terms": [
+                        {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                    ],
+                }
+            ]
+        )
+
+
+def test_validate_against_forward_records_rejects_duplicate_document_ids():
+    record = {
+        "doc_id": 101,
+        "terms": [
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="already been added"):
+        InvertedIndex().validate_against_forward_records([record, record])
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        None,
+        {"terms": []},
+        {"doc_id": 101},
+        {"doc_id": True, "terms": []},
+        {"doc_id": 101, "terms": "not-a-list"},
+    ],
+)
+def test_validate_against_forward_records_rejects_malformed_records(record):
+    with pytest.raises(ValueError):
+        InvertedIndex().validate_against_forward_records([record])
+
+
+def test_validate_against_forward_records_propagates_iterator_exception():
+    def records():
+        yield {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        }
+        raise RuntimeError("forward iterator failed")
+
+    index = InvertedIndex()
+    index.add_posting(1, 101, title_tf=1)
+
+    with pytest.raises(RuntimeError, match="forward iterator failed"):
+        index.validate_against_forward_records(records())
+
+
+def test_validation_does_not_mutate_index():
+    index = InvertedIndex()
+    index.add_document(101, term_frequencies={1: {"body_tf": 2}})
+    index_before = index.get_index()
+    df_before = index.df
+
+    assert index.validate() is True
+
+    assert index.get_index() == index_before
+    assert index.df == df_before
+
+
+def test_validate_against_forward_records_does_not_mutate_input_records():
+    records = [
+        {
+            "doc_id": 101,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 2, "tag_tf": 0},
+            ],
+        }
+    ]
+    records_before = [
+        {"doc_id": record["doc_id"], "terms": [dict(term) for term in record["terms"]]}
+        for record in records
+    ]
+    index = InvertedIndex()
+    index.build_from_forward_records(records)
+
+    assert index.validate_against_forward_records(records) is True
+    assert records == records_before

@@ -259,6 +259,170 @@ class InvertedIndex:
         self._index = new_index._index
         self._document_ids = new_index._document_ids
 
+    def validate(self) -> bool:
+        """Validate the in-memory index structure.
+
+        Returns ``True`` for a valid index.  Corruption raises ``ValueError``.
+        This method is read-only and never exposes or modifies index internals.
+        """
+        if not isinstance(self._index, dict):
+            raise ValueError("internal index must be a dictionary")
+        if not isinstance(self._document_ids, set):
+            raise ValueError("internal document ID collection must be a set")
+
+        for doc_id in self._document_ids:
+            self._validate_doc_id(doc_id)
+
+        derived_df: dict[int, int] = {}
+        for term_id, postings in self._index.items():
+            self._validate_term_id(term_id)
+            if not isinstance(postings, list):
+                raise ValueError(
+                    f"postings for term_id={term_id} must be a list"
+                )
+            if not postings:
+                raise ValueError(
+                    f"term_id={term_id} has an empty postings list"
+                )
+
+            previous_doc_id = 0
+            seen_doc_ids: set[int] = set()
+            for posting in postings:
+                if not isinstance(posting, MappingABC):
+                    raise ValueError(
+                        f"posting for term_id={term_id} must be a mapping"
+                    )
+
+                expected_fields = {
+                    "doc_id",
+                    "title_tf",
+                    "body_tf",
+                    "tag_tf",
+                }
+                if set(posting) != expected_fields:
+                    raise ValueError(
+                        f"posting for term_id={term_id} has unexpected or "
+                        "missing fields"
+                    )
+
+                doc_id = posting["doc_id"]
+                self._validate_doc_id(doc_id)
+                if doc_id in seen_doc_ids:
+                    raise ValueError(
+                        f"duplicate document ID {doc_id} in postings "
+                        f"for term_id={term_id}"
+                    )
+                if doc_id <= previous_doc_id:
+                    raise ValueError(
+                        f"posting document IDs are not strictly increasing "
+                        f"for term_id={term_id}"
+                    )
+                seen_doc_ids.add(doc_id)
+                previous_doc_id = doc_id
+
+                tf_values = {}
+                for field_name in ("title_tf", "body_tf", "tag_tf"):
+                    value = posting[field_name]
+                    self._validate_tf(value, field_name)
+                    tf_values[field_name] = value
+
+                if (
+                    tf_values["title_tf"]
+                    + tf_values["body_tf"]
+                    + tf_values["tag_tf"]
+                    == 0
+                ):
+                    raise ValueError(
+                        f"posting for term_id={term_id}, doc_id={doc_id} "
+                        "must have at least one non-zero TF"
+                    )
+
+            derived_df[term_id] = len(postings)
+
+        if self.df != derived_df:
+            raise ValueError("document frequency entries are inconsistent")
+        return True
+
+    def validate_against_forward_records(
+        self,
+        records: Iterable[object],
+    ) -> bool:
+        """Validate exact consistency between the index and Forward records."""
+        self.validate()
+
+        forward = InvertedIndex()
+        try:
+            for record in records:
+                forward.add_forward_record(record)
+        except Exception:
+            raise
+
+        forward_docs = forward._document_ids
+        current_docs = set(self._document_ids)
+        for postings in self._index.values():
+            for posting in postings:
+                current_docs.add(posting["doc_id"])
+
+        missing_documents = sorted(forward_docs - current_docs)
+        if missing_documents:
+            raise ValueError(
+                "missing document(s) in Inverted Index: "
+                + ", ".join(str(doc_id) for doc_id in missing_documents)
+            )
+
+        extra_documents = sorted(current_docs - forward_docs)
+        if extra_documents:
+            raise ValueError(
+                "extra document(s) in Inverted Index: "
+                + ", ".join(str(doc_id) for doc_id in extra_documents)
+            )
+
+        forward_index = forward.get_index()
+        current_index = self.get_index()
+
+        for term_id in sorted(set(forward_index) | set(current_index)):
+            forward_postings = forward_index.get(term_id, [])
+            current_postings = current_index.get(term_id, [])
+            forward_by_doc = {
+                posting["doc_id"]: posting
+                for posting in forward_postings
+            }
+            current_by_doc = {
+                posting["doc_id"]: posting
+                for posting in current_postings
+            }
+
+            for doc_id in sorted(set(forward_by_doc) - set(current_by_doc)):
+                raise ValueError(
+                    f"missing posting for term_id={term_id}, doc_id={doc_id}"
+                )
+            for doc_id in sorted(set(current_by_doc) - set(forward_by_doc)):
+                raise ValueError(
+                    f"extra posting for term_id={term_id}, doc_id={doc_id}"
+                )
+
+            for doc_id in sorted(set(forward_by_doc) & set(current_by_doc)):
+                for field_name in ("title_tf", "body_tf", "tag_tf"):
+                    forward_value = forward_by_doc[doc_id][field_name]
+                    current_value = current_by_doc[doc_id][field_name]
+                    if forward_value != current_value:
+                        raise ValueError(
+                            f"incorrect {field_name} for term_id={term_id}, "
+                            f"doc_id={doc_id}: expected {forward_value}, "
+                            f"got {current_value}"
+                        )
+
+        for term_id in set(forward_index) | set(current_index):
+            forward_df = len(forward_index.get(term_id, []))
+            current_df = len(current_index.get(term_id, []))
+            if forward_df != current_df:
+                raise ValueError(
+                    f"document frequency mismatch for term_id={term_id}: "
+                    f"expected {forward_df}, got {current_df}"
+                )
+
+        return True
+
     def get_postings(self, term_id: int) -> list[Posting]:
         """Return a copy of postings for a term ID, sorted by document ID."""
         self._validate_term_id(term_id)
