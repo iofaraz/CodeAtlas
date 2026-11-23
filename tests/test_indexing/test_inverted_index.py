@@ -65,6 +65,27 @@ def test_document_frequency_and_postings_sorted_by_doc_id():
     assert index.df == {4: 3}
 
 
+def test_df_is_derived_from_posting_list_lengths():
+    index = InvertedIndex()
+    index.add_document(
+        101,
+        term_frequencies={
+            1: {"title_tf": 1},
+            2: {"body_tf": 2},
+        },
+    )
+    index.add_document(
+        102,
+        term_frequencies={
+            1: {"tag_tf": 1},
+        },
+    )
+
+    assert index.get_document_frequency(1) == len(index.get_postings(1)) == 2
+    assert index.get_document_frequency(2) == len(index.get_postings(2)) == 1
+    assert index.df == {1: 2, 2: 1}
+
+
 def test_zero_frequency_posting_is_not_created():
     index = InvertedIndex()
     index.add_posting(9, 1, 0, 0, 0)

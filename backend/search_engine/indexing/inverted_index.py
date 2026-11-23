@@ -273,7 +273,6 @@ class InvertedIndex:
         for doc_id in self._document_ids:
             self._validate_doc_id(doc_id)
 
-        derived_df: dict[int, int] = {}
         for term_id, postings in self._index.items():
             self._validate_term_id(term_id)
             if not isinstance(postings, list):
@@ -337,10 +336,6 @@ class InvertedIndex:
                         "must have at least one non-zero TF"
                     )
 
-            derived_df[term_id] = len(postings)
-
-        if self.df != derived_df:
-            raise ValueError("document frequency entries are inconsistent")
         return True
 
     def validate_against_forward_records(

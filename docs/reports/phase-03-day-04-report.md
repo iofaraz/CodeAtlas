@@ -47,7 +47,11 @@ records.
 - Every posting has at least one non-zero TF.
 - Posting document IDs are strictly increasing.
 - No duplicate document ID occurs for the same term.
-- Each term's derived document frequency equals the number of postings.
+
+Document frequency is not stored separately in the in-memory index. The `df`
+property and `get_document_frequency()` derive it directly from the length of
+each term's posting list. Consequently, structural validation does not contain
+a redundant comparison against a separate derived DF mapping.
 
 ## 5. Forward Index Consistency Rules
 
