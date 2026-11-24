@@ -8,5 +8,5 @@ with open("data/processed/documents.jsonl", "r", encoding="utf-8") as f:
             docs.append(json.loads(line))
 
 lex = Lexicon.build(docs)
-lex.save("data/lexicon")
+lex.save("")
 print("Done! Terms:", len(lex.term_to_id))

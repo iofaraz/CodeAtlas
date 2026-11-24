@@ -23,11 +23,11 @@ def test_build_and_save_full_documents_jsonl(tmp_path):
     lex = Lexicon.build(docs)
     assert len(lex.term_to_id) > 0
 
-    # Every df must be at least 1 and at most the total number of documents
-    for term, df in lex.term_to_df.items():
-        term_id = lex.get_term_id(term)
-        assert term_id is not None
-        assert lex.get_term(term_id) == term
+    # Every df must be between 1 and total number of documents
+    for term_id, df in lex.document_frequency.items():
+        term = lex.get_term(term_id)
+        assert term is not None
+        assert lex.get_term_id(term) == term_id
         assert lex.get_document_frequency(term_id) == df
         assert 1 <= df <= len(docs)
 
@@ -36,4 +36,4 @@ def test_build_and_save_full_documents_jsonl(tmp_path):
     loaded = Lexicon.load(tmp_path)
     assert loaded.term_to_id == lex.term_to_id
     assert loaded.id_to_term == lex.id_to_term
-    assert loaded.term_to_df == lex.term_to_df
+    assert loaded.document_frequency == lex.document_frequency
