@@ -1,9 +1,11 @@
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
 TOKEN_FIELDS = ("title_tokens", "body_tokens", "tag_tokens")
 LEXICON_REL_PATH = Path("indexes/lexicon/lexicon.jsonl")
+_MISSING_DOC_ID = object()
 
 
 def _extract_field_tokens(doc, field_name):
@@ -36,8 +38,24 @@ class Lexicon:
     @classmethod
     def build(cls, documents):
         doc_freq_counter = Counter()
+        seen_doc_ids = set()
 
         for doc in documents:
+            doc_id = (
+                doc.get("doc_id", _MISSING_DOC_ID)
+                if isinstance(doc, dict)
+                else getattr(doc, "doc_id", _MISSING_DOC_ID)
+            )
+            if doc_id is not _MISSING_DOC_ID:
+                try:
+                    if doc_id in seen_doc_ids:
+                        raise ValueError(f"duplicate doc_id {doc_id}")
+                    seen_doc_ids.add(doc_id)
+                except TypeError as exc:
+                    raise ValueError(
+                        f"doc_id must be hashable, got {doc_id!r}"
+                    ) from exc
+
             doc_unique_terms = set()
             for field in TOKEN_FIELDS:
                 for raw_token in _extract_field_tokens(doc, field):
@@ -78,6 +96,24 @@ class Lexicon:
                 f"Inconsistent statistics size: term_to_id has {n_terms} entries, "
                 f"document_frequency has {len(self.document_frequency)} entries."
             )
+
+        expected_ids = set(range(1, n_terms + 1))
+        if set(self.id_to_term.keys()) != expected_ids:
+            raise ValueError(
+                "Term IDs must be contiguous and start at 1 "
+                f"(expected {sorted(expected_ids)}, got {sorted(self.id_to_term.keys())})."
+            )
+
+        for term_id in range(1, n_terms + 1):
+            term = self.id_to_term.get(term_id)
+            if term is not None and self.term_to_id.get(term) != term_id:
+                raise ValueError(
+                    f"Conflicting mapping for term_id {term_id}: {term!r}"
+                )
+
+        ordered_terms = [self.id_to_term[term_id] for term_id in range(1, n_terms + 1)]
+        if ordered_terms != sorted(ordered_terms):
+            raise ValueError("Term IDs must follow lexicographic normalized-term ordering.")
 
         seen_ids = set()
         for term, term_id in self.term_to_id.items():
@@ -128,16 +164,22 @@ class Lexicon:
         self.validate()
         target_file = Path(output_dir) / LEXICON_REL_PATH
         target_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with target_file.open("w", encoding="utf-8") as f:
-            for term_id in sorted(self.id_to_term.keys()):
-                row = {
-                    "term_id": term_id,
-                    "term": self.id_to_term[term_id],
-                    "df": self.document_frequency[term_id],
-                }
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
+        temp_file = target_file.with_name(target_file.name + ".tmp")
+        try:
+            with temp_file.open("w", encoding="utf-8", newline="\n") as f:
+                for term_id in sorted(self.id_to_term.keys()):
+                    row = {
+                        "term_id": term_id,
+                        "term": self.id_to_term[term_id],
+                        "df": self.document_frequency[term_id],
+                    }
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, target_file)
+        except BaseException:
+            temp_file.unlink(missing_ok=True)
+            raise
         return target_file
 
     @classmethod
@@ -149,39 +191,75 @@ class Lexicon:
         term_to_id = {}
         id_to_term = {}
         document_frequency = {}
+        previous_term_id = 0
+        previous_term = None
 
         with in_path.open("r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, start=1):
                 stripped = line.strip()
                 if not stripped:
                     continue
+                where = f"{in_path}:{line_num}"
 
-                entry = json.loads(stripped)
+                try:
+                    entry = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"{where}: invalid JSON ({exc})") from exc
                 if not isinstance(entry, dict):
-                    raise ValueError(f"Malformed entry on line {line_num}: {entry!r}")
+                    raise ValueError(f"{where}: record must be an object")
 
-                for key in ("term_id", "term", "df"):
-                    if key not in entry:
-                        raise ValueError(f"Missing '{key}' on line {line_num}: {entry!r}")
+                required_fields = {"term_id", "term", "df"}
+                missing_fields = required_fields - set(entry)
+                if missing_fields:
+                    raise ValueError(
+                        f"{where}: missing required fields "
+                        f"{sorted(missing_fields)}"
+                    )
+                extra_fields = set(entry) - required_fields
+                if extra_fields:
+                    raise ValueError(
+                        f"{where}: unexpected fields {sorted(extra_fields)}"
+                    )
 
-                term = _normalize_term(entry["term"])
+                raw_term = entry["term"]
+                try:
+                    term = _normalize_term(raw_term)
+                except ValueError as exc:
+                    raise ValueError(f"{where}: invalid term ({exc})") from exc
                 term_id = entry["term_id"]
                 df = entry["df"]
 
                 if not term:
-                    raise ValueError(f"Empty term on line {line_num}")
+                    raise ValueError(f"{where}: term must not be empty")
+                if term != raw_term:
+                    raise ValueError(f"{where}: term must be normalized")
                 if term in term_to_id:
-                    raise ValueError(f"Duplicate term {term!r} on line {line_num}")
+                    raise ValueError(f"{where}: duplicate term {term!r}")
                 if isinstance(term_id, bool) or not isinstance(term_id, int) or term_id < 1:
-                    raise ValueError(f"Invalid term_id {term_id!r} on line {line_num}")
+                    raise ValueError(
+                        f"{where}: term_id must be a positive integer"
+                    )
                 if term_id in id_to_term:
-                    raise ValueError(f"Duplicate term_id {term_id} on line {line_num}")
+                    raise ValueError(f"{where}: duplicate term_id {term_id}")
+                if term_id <= previous_term_id:
+                    raise ValueError(
+                        f"{where}: term IDs must be strictly increasing"
+                    )
+                if previous_term is not None and term <= previous_term:
+                    raise ValueError(
+                        f"{where}: terms are not in lexicographic order"
+                    )
                 if isinstance(df, bool) or not isinstance(df, int) or df < 1:
-                    raise ValueError(f"Invalid df {df!r} on line {line_num}")
+                    raise ValueError(f"{where}: df must be a positive integer")
 
                 term_to_id[term] = term_id
                 id_to_term[term_id] = term
                 document_frequency[term_id] = df
+                previous_term_id = term_id
+                previous_term = term
+
+        if set(id_to_term) != set(range(1, len(id_to_term) + 1)):
+            raise ValueError(f"{in_path}: term IDs must be contiguous and start at 1")
 
         return cls(
             term_to_id=term_to_id,

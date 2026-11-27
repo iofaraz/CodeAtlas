@@ -100,9 +100,27 @@ def main() -> int:
     parser.add_argument("--expected-docs", type=int, default=50083)
     args = parser.parse_args()
     documents_path = args.documents or args.root / "data/processed/documents.jsonl"
+    lexicon_path = args.root / "indexes" / "lexicon" / "lexicon.jsonl"
+    if not lexicon_path.is_file():
+        print(
+            f"Forward Index build failed: Lexicon not found at {lexicon_path}",
+            file=sys.stderr,
+        )
+        print("Run: python scripts/build_lexicon.py", file=sys.stderr)
+        return 1
+    if not documents_path.is_file():
+        print(
+            f"Forward Index build failed: documents file not found: {documents_path}",
+            file=sys.stderr,
+        )
+        return 1
 
     start = time.perf_counter()
-    lexicon = load_lexicon(args.root)
+    try:
+        lexicon = load_lexicon(args.root)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as exc:
+        print(f"Forward Index build failed: invalid Lexicon ({exc})", file=sys.stderr)
+        return 1
     print(f"Lexicon loaded in {time.perf_counter() - start:.1f}s")
 
     build_start = time.perf_counter()

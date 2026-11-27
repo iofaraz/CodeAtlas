@@ -129,7 +129,9 @@ structures required by the project.
 
 #### 3.2 Forward Index
 - Map each document to its terms.
-- Preserve term frequencies and positions where required.
+- Preserve field-specific term frequencies. Token positions are not stored in
+  the current Phase 3 structures; positional postings may be considered later
+  if phrase or proximity retrieval is required.
 - Store the forward index in files.
 
 #### 3.3 Inverted Index
@@ -150,6 +152,23 @@ structures required by the project.
 - Term-to-document relationships are accurate.
 - Indexes can be saved and loaded.
 - Indexing data is not stored in a database.
+
+**Phase Status:** Complete. Lexicon, Forward, and Inverted construction is
+implemented in separate build scripts and verified against the full dataset.
+The run processed 50,083 documents and 87,183 unique terms; the Forward Index
+contains 4,232,033 term entries and the Inverted Index contains 4,232,033
+postings. Exact cross-index validation and the Inverted save/load round trip
+passed. The earlier combined indexing and preprocessing run had 200 passing
+tests; the latest focused indexing run had 221 passing tests and excluded one
+dataset-backed Lexicon test. These test scopes are distinguished in
+`docs/phases/phase-03-indexing.md`.
+
+The current indexes store field-specific term frequencies, not token
+positions. Forward Index build and load retain the complete structure in
+memory; no Forward-only peak RAM measurement is recorded. The measured Inverted
+run working set is a separate observation and does not establish the project's
+general RAM targets. Search, ranking, and positional retrieval remain
+unimplemented.
 
 **Official Milestone:** 29 November 2026.
 
@@ -439,7 +458,7 @@ functionality.
 |---|---|
 | Phase 1 — Foundation | Complete |
 | Phase 2 — Preprocessing | Complete (100-word measurement interpretation pending) |
-| Phase 3 — Core Indexing | Not Started |
+| Phase 3 — Core Indexing | Complete |
 | Phase 4 — Barrels | Not Started |
 | Phase 5 — Search and Ranking | Not Started |
 | Phase 6 — Semantic Search | Not Started |

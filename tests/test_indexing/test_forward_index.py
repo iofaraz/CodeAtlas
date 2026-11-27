@@ -163,7 +163,7 @@ def test_duplicate_doc_id_rejected(lexicon):
         ForwardIndex.build([doc(7, body=["list"]), doc(7, body=["python"])], lexicon)
 
 
-@pytest.mark.parametrize("bad_id", ["12", 1.5, None, True])
+@pytest.mark.parametrize("bad_id", ["12", 1.5, None, True, 0, -1])
 def test_non_integer_doc_id_rejected(lexicon, bad_id):
     with pytest.raises(ValueError):
         ForwardIndex.build([doc(bad_id, body=["list"])], lexicon)
@@ -266,6 +266,12 @@ def test_load_missing_file(lexicon, tmp_path):
         ForwardIndex.load(tmp_path, lexicon)
 
 
+def test_load_accepts_empty_file(lexicon, tmp_path):
+    write_lines(tmp_path, [])
+
+    assert ForwardIndex.load(tmp_path, lexicon).doc_ids() == []
+
+
 def write_lines(directory, lines):
     (directory / FORWARD_INDEX_REL_PATH).parent.mkdir(parents=True, exist_ok=True)
     (directory / FORWARD_INDEX_REL_PATH).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -279,13 +285,19 @@ def term(term_id, t=1, b=0, g=0):
     "lines, message",
     [
         (["{not json"], "invalid JSON"),
+        ([json.dumps(["not", "an", "object"])], "record must be an object"),
         ([json.dumps({"doc_id": 1})], "expected"),
+        ([json.dumps({"doc_id": 1, "terms": [], "extra": 1})], "unexpected fields"),
         ([json.dumps({"doc_id": "1", "terms": []})], "doc_id must be an integer"),
         ([json.dumps({"doc_id": 1, "terms": []}), json.dumps({"doc_id": 1, "terms": []})], "duplicate doc_id"),
         ([json.dumps({"doc_id": 2, "terms": []}), json.dumps({"doc_id": 1, "terms": []})], "ascending"),
         ([json.dumps({"doc_id": 1, "terms": [{"term_id": 1}]})], "malformed"),
+        ([json.dumps({"doc_id": 1, "terms": [{**term(1), "extra": 1}]})], "unexpected fields"),
+        ([json.dumps({"doc_id": 1, "terms": [term(0)]})], "positive"),
+        ([json.dumps({"doc_id": 1, "terms": [term(True)]})], "non-integer"),
         ([json.dumps({"doc_id": 1, "terms": [term(1, t=-1)]})], "negative"),
         ([json.dumps({"doc_id": 1, "terms": [term(1, t=1.5)]})], "non-integer"),
+        ([json.dumps({"doc_id": 1, "terms": [term(1, t=True)]})], "non-integer"),
         ([json.dumps({"doc_id": 1, "terms": [term(1, 0, 0, 0)]})], "all-zero"),
         ([json.dumps({"doc_id": 1, "terms": [term(2), term(1)]})], "ascending"),
         ([json.dumps({"doc_id": 1, "terms": [term(2), term(2)]})], "ascending"),

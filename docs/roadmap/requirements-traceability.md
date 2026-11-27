@@ -86,7 +86,7 @@ Phase 2 verification:
 | Backend environment and FastAPI | Complete |
 | Initial Document model | Complete |
 | Dataset processing | Complete |
-| Core indexing structures | Not Started |
+| Core indexing structures | Complete; full-corpus build and cross-index verification passed |
 | Search and ranking | Not Started |
 | Semantic search | Not Started |
 | Autocomplete | Not Started |
@@ -97,3 +97,32 @@ Phase 2 verification:
 
 Only requirements that have been implemented and
 verified should be marked Complete.
+
+## 8. Phase 3 Full-Dataset Verification
+
+Measured results from the completed Phase 3 run:
+
+| Measure | Result |
+|---|---:|
+| Documents | 50,083 |
+| Unique Lexicon terms | 87,183 |
+| Forward term entries | 4,232,033 |
+| Inverted postings | 4,232,033 |
+| Inverted construction | 19.2 seconds |
+| Complete Inverted build and verification | 159.1 seconds |
+| Inverted JSONL output | 218.84 MiB |
+| Peak process working set | 1,007.5 MiB |
+| Earlier combined indexing and preprocessing run | 200 passed in 11.81 seconds |
+| Latest focused Lexicon/Forward/Inverted test run | 221 passed, 1 deselected |
+
+These are measurements from one machine and run, not guarantees for other
+environments. Exact Forward-to-Inverted consistency and the Inverted save/load
+round trip passed. The focused run excluded the dataset-backed Lexicon
+save/load test and did not include preprocessing tests. The earlier combined
+test count refers to a separate run and scope.
+
+Phase 3 stores field-specific term frequencies, not token positions. Positional
+search is not implemented or claimed complete. Forward Index build/load retain
+the complete structure in memory; no Forward-only peak RAM measurement was
+recorded. The Inverted-run working set does not establish the general memory
+targets listed above. These results also do not establish search latency.

@@ -146,6 +146,8 @@ class ForwardIndex:
             doc_id = _read_field(document, "doc_id")
             if not _is_int(doc_id):
                 raise ValueError(f"doc_id must be an integer, got {doc_id!r}")
+            if doc_id <= 0:
+                raise ValueError(f"doc_id must be a positive integer, got {doc_id!r}")
             if doc_id in index._records:
                 raise ValueError(f"duplicate doc_id {doc_id}")
 
@@ -215,6 +217,8 @@ class ForwardIndex:
         """
         known: set[int] = set()
         for doc_id, flat in self._records.items():
+            if not _is_int(doc_id) or doc_id <= 0:
+                raise ValueError(f"invalid doc_id {doc_id!r}; doc_id must be positive")
             previous = 0
             for i in range(0, len(flat), _STRIDE):
                 term_id, title_tf, body_tf, tag_tf = flat[i : i + _STRIDE]
@@ -317,34 +321,80 @@ class ForwardIndex:
                     record = json.loads(line)
                 except json.JSONDecodeError as exc:
                     raise ValueError(f"{where}: invalid JSON ({exc})") from exc
-                if (
-                    not isinstance(record, dict)
-                    or "doc_id" not in record
-                    or not isinstance(record.get("terms"), list)
-                ):
-                    raise ValueError(f"{where}: expected {{'doc_id', 'terms'}} object")
+                if not isinstance(record, dict):
+                    raise ValueError(f"{where}: record must be an object")
+                required_record_fields = {"doc_id", "terms"}
+                missing_fields = required_record_fields - set(record)
+                if missing_fields:
+                    raise ValueError(
+                        f"{where}: expected exactly {{'doc_id', 'terms'}} fields; "
+                        "missing required fields "
+                        f"{sorted(missing_fields)}"
+                    )
+                extra_fields = set(record) - required_record_fields
+                if extra_fields:
+                    raise ValueError(
+                        f"{where}: unexpected fields {sorted(extra_fields)}; "
+                        "expected exactly {'doc_id', 'terms'}"
+                    )
+                if not isinstance(record["terms"], list):
+                    raise ValueError(f"{where}: terms must be a list")
                 doc_id = record["doc_id"]
                 if not _is_int(doc_id):
                     raise ValueError(f"{where}: doc_id must be an integer")
+                if doc_id <= 0:
+                    raise ValueError(f"{where}: doc_id must be a positive integer")
                 if doc_id in index._records:
                     raise ValueError(f"{where}: duplicate doc_id {doc_id}")
-                if previous_doc is not None and doc_id < previous_doc:
-                    raise ValueError(f"{where}: doc_ids are not in ascending order")
+                if previous_doc is not None and doc_id <= previous_doc:
+                    raise ValueError(
+                        f"{where}: doc_ids are not in strictly ascending order"
+                    )
                 previous_doc = doc_id
 
                 flat = array("I")
+                previous_term_id = 0
                 for entry in record["terms"]:
-                    try:
-                        values = [
-                            entry["term_id"],
-                            entry["title_tf"],
-                            entry["body_tf"],
-                            entry["tag_tf"],
-                        ]
-                    except (TypeError, KeyError):
-                        raise ValueError(f"{where}: malformed term entry {entry!r}") from None
+                    if not isinstance(entry, dict):
+                        raise ValueError(f"{where}: term entry must be an object")
+                    required_term_fields = {
+                        "term_id",
+                        "title_tf",
+                        "body_tf",
+                        "tag_tf",
+                    }
+                    missing_fields = required_term_fields - set(entry)
+                    if missing_fields:
+                        raise ValueError(
+                            f"{where}: malformed term entry; missing required fields "
+                            f"{sorted(missing_fields)}"
+                        )
+                    extra_fields = set(entry) - required_term_fields
+                    if extra_fields:
+                        raise ValueError(
+                            f"{where}: malformed term entry; unexpected fields "
+                            f"{sorted(extra_fields)}"
+                        )
+                    values = [
+                        entry["term_id"],
+                        entry["title_tf"],
+                        entry["body_tf"],
+                        entry["tag_tf"],
+                    ]
                     if not all(_is_int(v) for v in values) or min(values) < 0:
                         raise ValueError(f"{where}: non-integer or negative value in {entry!r}")
+                    term_id = values[0]
+                    if term_id == 0:
+                        raise ValueError(f"{where}: term_id must be positive")
+                    if term_id <= previous_term_id:
+                        raise ValueError(
+                            f"{where}: term IDs are not in strictly ascending order"
+                        )
+                    previous_term_id = term_id
+                    if sum(values[1:]) == 0:
+                        raise ValueError(
+                            f"{where}: all-zero term entry is not allowed"
+                        )
                     flat.extend(values)
                 index._records[doc_id] = flat
         index.validate(lexicon)

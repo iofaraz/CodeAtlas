@@ -1,6 +1,182 @@
+import json
+
 import pytest
 
-from search_engine.indexing.inverted_index import InvertedIndex
+from search_engine.indexing.inverted_index import (
+    INVERTED_INDEX_REL_PATH,
+    InvertedIndex,
+)
+
+
+def write_inverted_lines(directory, lines):
+    path = directory / INVERTED_INDEX_REL_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def inverted_posting(doc_id, title_tf=1, body_tf=0, tag_tf=0):
+    return {
+        "doc_id": doc_id,
+        "title_tf": title_tf,
+        "body_tf": body_tf,
+        "tag_tf": tag_tf,
+    }
+
+
+def inverted_record(term_id, postings, **extra_fields):
+    record = {"term_id": term_id, "df": len(postings), "postings": postings}
+    record.update(extra_fields)
+    return record
+
+
+@pytest.mark.parametrize(
+    "lines, message",
+    [
+        (["{not json"], "invalid JSON"),
+        ([json.dumps(["not", "an", "object"])], "record must be an object"),
+        ([json.dumps({"term_id": 1, "df": 1})], "missing required fields"),
+        (
+            [json.dumps(inverted_record(1, [inverted_posting(1)], extra=1))],
+            "unexpected fields",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(
+                        1,
+                        [{**inverted_posting(1), "extra": 1}],
+                    )
+                )
+            ],
+            "unexpected fields",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(
+                        1,
+                        [{"doc_id": 1, "title_tf": 1, "body_tf": 0}],
+                    )
+                )
+            ],
+            "missing required fields",
+        ),
+        (
+            [
+                json.dumps(inverted_record(2, [inverted_posting(1)])),
+                json.dumps(inverted_record(1, [inverted_posting(1)])),
+            ],
+            "strictly increasing",
+        ),
+        (
+            [
+                json.dumps(inverted_record(0, [inverted_posting(1)]))
+            ],
+            "positive integer",
+        ),
+        (
+            [
+                json.dumps(inverted_record(True, [inverted_posting(1)]))
+            ],
+            "positive integer",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(
+                        1,
+                        [inverted_posting(2), inverted_posting(1)],
+                    )
+                )
+            ],
+            "strictly increasing",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(
+                        1,
+                        [inverted_posting(0)],
+                    )
+                )
+            ],
+            "positive integer",
+        ),
+        (
+            [
+                json.dumps(inverted_record(1, [inverted_posting(1)])),
+                json.dumps(inverted_record(1, [inverted_posting(2)])),
+            ],
+            "strictly increasing",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(
+                        1,
+                        [inverted_posting(1), inverted_posting(1)],
+                    )
+                )
+            ],
+            "strictly increasing",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(1, [inverted_posting(1, title_tf=0)])
+                )
+            ],
+            "non-zero TF",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(1, [inverted_posting(1, title_tf=True)])
+                )
+            ],
+            "non-negative integer",
+        ),
+        (
+            [
+                json.dumps(inverted_record(1, []))
+            ],
+            "df must be a positive integer",
+        ),
+        (
+            [
+                json.dumps(
+                    inverted_record(1, [inverted_posting(1, title_tf=-1)])
+                )
+            ],
+            "non-negative integer",
+        ),
+        (
+            [
+                json.dumps(
+                    {
+                        "term_id": 1,
+                        "df": 2,
+                        "postings": [inverted_posting(1)],
+                    }
+                )
+            ],
+            "does not match",
+        ),
+    ],
+)
+def test_load_rejects_malformed_or_contract_violating_records(
+    tmp_path, lines, message
+):
+    write_inverted_lines(tmp_path, lines)
+
+    with pytest.raises(ValueError, match=message):
+        InvertedIndex.load(tmp_path)
+
+
+def test_load_accepts_empty_file(tmp_path):
+    write_inverted_lines(tmp_path, [])
+
+    assert InvertedIndex.load(tmp_path).get_index() == {}
 
 
 def test_empty_index_initialization():
@@ -10,6 +186,94 @@ def test_empty_index_initialization():
     assert index.get_index() == {}
     assert index.get_postings(1) == []
     assert index.get_document_frequency(1) == 0
+
+
+def test_save_load_round_trip(tmp_path):
+    index = InvertedIndex()
+    index.add_posting(4, 205, title_tf=1)
+    index.add_posting(4, 101, body_tf=2)
+
+    path = index.save(tmp_path)
+    assert path.exists()
+
+    loaded = InvertedIndex.load(tmp_path)
+    assert loaded.get_index() == index.get_index()
+    assert loaded.df == {4: 2}
+
+
+def test_loaded_index_rejects_duplicate_document_without_overlapping_terms(tmp_path):
+    index = InvertedIndex()
+    index.add_document(
+        101,
+        term_frequencies={
+            1: {"title_tf": 2, "body_tf": 3, "tag_tf": 1},
+            2: {"body_tf": 4},
+        },
+    )
+    index.save(tmp_path)
+
+    loaded = InvertedIndex.load(tmp_path)
+    expected_index = loaded.get_index()
+    expected_df = loaded.df
+
+    with pytest.raises(ValueError, match="document 101 has already been added"):
+        loaded.add_document(101, term_frequencies={3: {"title_tf": 1}})
+
+    assert loaded.get_index() == expected_index
+    assert loaded.df == expected_df
+    assert loaded.get_postings(1) == [
+        {"doc_id": 101, "title_tf": 2, "body_tf": 3, "tag_tf": 1}
+    ]
+    assert loaded.get_postings(2) == [
+        {"doc_id": 101, "title_tf": 0, "body_tf": 4, "tag_tf": 0}
+    ]
+
+
+def test_loaded_index_accepts_new_document_and_preserves_existing_postings(tmp_path):
+    index = InvertedIndex()
+    index.add_document(
+        101,
+        term_frequencies={
+            1: {"title_tf": 2, "body_tf": 3, "tag_tf": 1},
+            2: {"body_tf": 4},
+        },
+    )
+    index.save(tmp_path)
+
+    loaded = InvertedIndex.load(tmp_path)
+    loaded.add_document(
+        205,
+        term_frequencies={
+            1: {"tag_tf": 2},
+            3: {"title_tf": 1},
+        },
+    )
+
+    assert loaded.get_postings(1) == [
+        {"doc_id": 101, "title_tf": 2, "body_tf": 3, "tag_tf": 1},
+        {"doc_id": 205, "title_tf": 0, "body_tf": 0, "tag_tf": 2},
+    ]
+    assert loaded.get_postings(2) == [
+        {"doc_id": 101, "title_tf": 0, "body_tf": 4, "tag_tf": 0}
+    ]
+    assert loaded.get_postings(3) == [
+        {"doc_id": 205, "title_tf": 1, "body_tf": 0, "tag_tf": 0}
+    ]
+    assert loaded.df == {1: 2, 2: 1, 3: 1}
+
+
+def test_empty_document_id_is_not_preserved_by_inverted_jsonl(tmp_path):
+    index = InvertedIndex()
+    index.add_document(101)
+    index.save(tmp_path)
+
+    loaded = InvertedIndex.load(tmp_path)
+
+    assert loaded.get_index() == {}
+    with pytest.raises(ValueError, match="missing document"):
+        loaded.validate_against_forward_records(
+            [{"doc_id": 101, "terms": []}]
+        )
 
 
 def test_document_counts_repeated_terms_in_each_field():
@@ -86,12 +350,17 @@ def test_df_is_derived_from_posting_list_lengths():
     assert index.df == {1: 2, 2: 1}
 
 
-def test_zero_frequency_posting_is_not_created():
+def test_zero_frequency_posting_is_rejected_without_mutation():
     index = InvertedIndex()
-    index.add_posting(9, 1, 0, 0, 0)
+    index.add_posting(3, 20, title_tf=2)
+    index_before = index.get_index()
+    df_before = index.df
 
-    assert index.get_postings(9) == []
-    assert index.get_document_frequency(9) == 0
+    with pytest.raises(ValueError, match="at least one non-zero TF"):
+        index.add_posting(9, 1, 0, 0, 0)
+
+    assert index.get_index() == index_before
+    assert index.df == df_before
 
 
 @pytest.mark.parametrize("term_id", [0, -1, 1.5, True, "1"])
@@ -251,6 +520,13 @@ def test_forward_record_requires_terms():
         InvertedIndex().add_forward_record({"doc_id": 101})
 
 
+def test_forward_record_rejects_unexpected_top_level_fields():
+    with pytest.raises(ValueError, match="unexpected fields"):
+        InvertedIndex().add_forward_record(
+            {"doc_id": 101, "terms": [], "extra": "not allowed"}
+        )
+
+
 @pytest.mark.parametrize("terms", [None, 1, "terms", {}, True])
 def test_forward_record_rejects_invalid_terms_sequence(terms):
     with pytest.raises(ValueError, match="terms must be a sequence"):
@@ -316,6 +592,24 @@ def test_forward_record_requires_tf_fields():
                 "doc_id": 101,
                 "terms": [
                     {"term_id": 1, "body_tf": 1, "tag_tf": 0},
+                ],
+            }
+        )
+
+
+def test_forward_record_rejects_unexpected_term_entry_fields():
+    with pytest.raises(ValueError, match="unexpected fields"):
+        InvertedIndex().add_forward_record(
+            {
+                "doc_id": 101,
+                "terms": [
+                    {
+                        "term_id": 1,
+                        "title_tf": 1,
+                        "body_tf": 0,
+                        "tag_tf": 0,
+                        "extra": "not allowed",
+                    }
                 ],
             }
         )
@@ -487,6 +781,74 @@ def test_build_from_forward_records_accepts_generator():
     assert index.get_document_frequency(3) == 2
 
 
+def test_bulk_build_from_sorted_records_preserves_order_frequencies_and_df():
+    records = [
+        {
+            "doc_id": 10,
+            "terms": [
+                {"term_id": 2, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                {"term_id": 7, "title_tf": 0, "body_tf": 2, "tag_tf": 1},
+            ],
+        },
+        {"doc_id": 20, "terms": []},
+        {
+            "doc_id": 30,
+            "terms": [
+                {"term_id": 2, "title_tf": 0, "body_tf": 1, "tag_tf": 1},
+                {"term_id": 7, "title_tf": 3, "body_tf": 0, "tag_tf": 0},
+            ],
+        },
+    ]
+    index = InvertedIndex()
+
+    index.build_from_forward_records(records)
+
+    assert index.get_postings(2) == [
+        {"doc_id": 10, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+        {"doc_id": 30, "title_tf": 0, "body_tf": 1, "tag_tf": 1},
+    ]
+    assert index.get_postings(7) == [
+        {"doc_id": 10, "title_tf": 0, "body_tf": 2, "tag_tf": 1},
+        {"doc_id": 30, "title_tf": 3, "body_tf": 0, "tag_tf": 0},
+    ]
+    assert index.get_document_frequency(2) == 2
+    assert index.get_document_frequency(7) == 2
+    assert index.validate() is True
+
+
+def test_bulk_build_sorts_unsorted_documents_once_and_returns_sorted_postings():
+    records = [
+        {
+            "doc_id": 30,
+            "terms": [
+                {"term_id": 4, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 10,
+            "terms": [
+                {"term_id": 4, "title_tf": 0, "body_tf": 2, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 20,
+            "terms": [
+                {"term_id": 4, "title_tf": 0, "body_tf": 0, "tag_tf": 3},
+            ],
+        },
+    ]
+    index = InvertedIndex()
+
+    index.build_from_forward_records(records)
+
+    assert index.get_postings(4) == [
+        {"doc_id": 10, "title_tf": 0, "body_tf": 2, "tag_tf": 0},
+        {"doc_id": 20, "title_tf": 0, "body_tf": 0, "tag_tf": 3},
+        {"doc_id": 30, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+    ]
+    assert index.get_document_frequency(4) == 3
+
+
 def test_build_from_forward_records_rejects_duplicate_document_ids():
     record = {
         "doc_id": 101,
@@ -497,6 +859,69 @@ def test_build_from_forward_records_rejects_duplicate_document_ids():
 
     with pytest.raises(ValueError, match="already been added"):
         InvertedIndex().build_from_forward_records([record, record])
+
+
+def test_bulk_build_rejects_duplicate_term_entries():
+    record = {
+        "doc_id": 101,
+        "terms": [
+            {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            {"term_id": 1, "title_tf": 0, "body_tf": 1, "tag_tf": 0},
+        ],
+    }
+
+    with pytest.raises(ValueError, match="duplicate term_id"):
+        InvertedIndex().build_from_forward_records([record])
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (
+            {"doc_id": True, "terms": []},
+            "doc_id",
+        ),
+        (
+            {
+                "doc_id": 1,
+                "terms": [
+                    {"term_id": True, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+            "term_id",
+        ),
+        (
+            {
+                "doc_id": 1,
+                "terms": [
+                    {"term_id": 1, "title_tf": True, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+            "frequency",
+        ),
+        (
+            {
+                "doc_id": 1,
+                "terms": [
+                    {"term_id": 1, "title_tf": -1, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+            "frequency",
+        ),
+        (
+            {
+                "doc_id": 1,
+                "terms": [
+                    {"term_id": 1, "title_tf": 0, "body_tf": 0, "tag_tf": 0},
+                ],
+            },
+            "non-zero TF",
+        ),
+    ],
+)
+def test_bulk_build_rejects_invalid_record_values(record, message):
+    with pytest.raises(ValueError, match=message):
+        InvertedIndex().build_from_forward_records([record])
 
 
 def test_build_from_forward_records_failure_is_atomic():
@@ -736,6 +1161,41 @@ def test_valid_index_matches_forward_records():
     index.build_from_forward_records(records)
 
     assert index.validate_against_forward_records(records) is True
+
+
+def test_validate_against_forward_records_accepts_unsorted_records():
+    records = [
+        {
+            "doc_id": 30,
+            "terms": [
+                {"term_id": 1, "title_tf": 0, "body_tf": 2, "tag_tf": 0},
+            ],
+        },
+        {
+            "doc_id": 10,
+            "terms": [
+                {"term_id": 1, "title_tf": 1, "body_tf": 0, "tag_tf": 0},
+            ],
+        },
+    ]
+    index = InvertedIndex()
+    index.build_from_forward_records(records)
+
+    assert index.validate_against_forward_records(records) is True
+
+
+def test_validate_against_lexicon_rejects_missing_lexicon_term():
+    class Lexicon:
+        document_frequency = {1: 1, 2: 1}
+
+        def get_term(self, term_id):
+            return {1: "first", 2: "second"}.get(term_id)
+
+    index = InvertedIndex()
+    index.add_posting(1, 10, title_tf=1)
+
+    with pytest.raises(ValueError, match="term_id=2"):
+        index.validate_against_lexicon(Lexicon())
 
 
 def test_validate_against_forward_records_accepts_generator():

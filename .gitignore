@@ -21,10 +21,17 @@ indexes/*
 !indexes/forward/
 !indexes/inverted/
 !indexes/barrels/
+indexes/lexicon/*
+indexes/forward/*
+indexes/inverted/*
 !indexes/lexicon/.gitkeep
 !indexes/forward/.gitkeep
 !indexes/inverted/.gitkeep
 !indexes/barrels/.gitkeep
+
+# Temporary index-build output
+/.inverted-index-stage-*/
+indexes/*/*.tmp
 
 # Frontend
 node_modules/

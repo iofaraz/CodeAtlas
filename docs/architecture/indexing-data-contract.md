@@ -2,9 +2,10 @@
 
 ## Status
 
-This document defines the proposed shared data contract for the Lexicon,
-Forward Index, and Inverted Index. It is an integration specification, not a
-claim that every component has already been implemented.
+This document defines the shared data contract implemented by the Lexicon,
+Forward Index, and Inverted Index. The structures and their full-dataset
+consistency were verified; measured results are recorded in
+`docs/phases/phase-03-indexing.md`.
 
 All indexing structures are JSONL-based at the shared serialization boundary.
 Each JSONL file contains one complete record per line. Strings must be
@@ -55,7 +56,7 @@ Lexicon JSONL fields are:
 
 - `term_id`: positive integer.
 - `term`: normalized vocabulary term.
-- `df`: non-negative integer document frequency.
+- `df`: positive integer document frequency.
 
 Lexicon records must include terms whose DF is greater than zero. Because the
 complete vocabulary is derived from the corpus, an implementer should not
@@ -97,6 +98,11 @@ Forward Index rules:
    - `body_tf`: occurrences in the normalized document body.
    - `tag_tf`: occurrences in normalized document tags.
 
+The current Forward and Inverted JSONL schemas store field-specific term
+frequencies only. They do not store token positions or offsets. Positional
+postings for phrase or proximity retrieval would require a future contract and
+schema extension; positional search is not implemented by Phase 3.
+
 The complete term array may be represented on one JSONL line or formatted
 across multiple lines in source; the serialized JSONL file must contain exactly
 one JSON object per line. The compact worked examples in this document are
@@ -134,6 +140,51 @@ Inverted Index rules:
 8. Every TF value must exactly match the corresponding Forward Index record.
 9. Terms with no postings must not be stored.
 
+The Inverted JSONL format contains term records and postings only; it has no
+document-only record for a document with zero indexed terms. Loading can
+reconstruct document IDs only from postings, so an empty document's ID is not
+preserved through an Inverted save/load round trip. The Forward Index remains
+the authoritative inventory of documents; callers must not infer complete
+document coverage from the Inverted Index when empty documents are possible.
+
+### JSONL loader validation policy
+
+All three loaders ignore blank lines and require every non-blank line to be a
+valid JSON object with exactly the fields defined by that structure's schema.
+Missing required fields, unexpected fields, malformed JSON, invalid value
+types, and duplicate records are rejected with a `ValueError` identifying the
+file and line for record-level failures. Whole-file consistency errors identify
+the file. Missing files continue to raise `FileNotFoundError`.
+
+IDs must be positive integers; booleans are not accepted as integers. Lexicon
+DF values must be positive integers. Forward and Inverted TF fields must be
+non-negative integers, with at least one non-zero TF per term entry or posting.
+A Lexicon JSONL term must already be normalized; loading does not silently
+rewrite serialized values.
+
+Loaders enforce only the ordering specified by the contract: Lexicon records
+by `term_id`, Forward records by `doc_id` and each `terms` array by `term_id`,
+and Inverted records by `term_id` and each postings array by `doc_id`. These
+sequences must be strictly increasing, so duplicates and out-of-order records
+are rejected. Each loader builds and validates a local index before returning;
+an invalid file never yields a partially loaded index.
+
+Duplicate detection is structure-specific: a Lexicon cannot repeat a term or
+term ID; a Forward Index cannot repeat a document or a term ID within one
+document; an Inverted Index cannot repeat a term record or a document posting
+within one term. The same document ID may validly appear under different
+Inverted terms. Empty files represent empty indexes; a Forward record may have
+an empty `terms` list, but an Inverted term record must have at least one
+posting.
+
+The structural policy is shared, but cross-index checks follow each API's
+inputs: `ForwardIndex.load()` checks term IDs against its required Lexicon but
+does not compare Forward-derived DF with Lexicon DF; callers can use
+`ForwardIndex.verify_document_frequencies()` for that check.
+`InvertedIndex.load()` checks Lexicon membership and DF when a Lexicon is
+supplied; without one it validates only the Inverted structure. Exact
+Forward/Inverted posting equality remains a separate validation operation.
+
 ## 4. Shared Consistency Invariants
 
 Every producer and consumer must enforce the following mandatory checks:
@@ -147,8 +198,8 @@ Every producer and consumer must enforce the following mandatory checks:
      posting for term `T` and document `D`.
    - There are no posting pairs absent from the Forward Index.
    - There are no Forward term records absent from the Inverted Index.
-4. For every term/document pair, the sum
-   `title_tf + body_tf + tag_tf` matches in both indexes.
+4. For every term/document pair, `title_tf`, `body_tf`, and `tag_tf` each
+   match exactly in both indexes.
 5. A document contributes at most one to a term's DF, regardless of repeated
    occurrences or the number of fields containing the term.
 6. Document IDs and term IDs must be positive integers.
@@ -159,9 +210,9 @@ Every producer and consumer must enforce the following mandatory checks:
    - Inverted records: ascending `term_id`.
    - Inverted `postings` arrays: ascending `doc_id`.
 
-Validation should compare complete posting TF values, not only the sum of TF
-values. For example, `title_tf=1, body_tf=0, tag_tf=0` must not be replaced
-by an equal sum that does not preserve which field contains the occurrence.
+Validation compares complete posting TF values, not only their sum. For
+example, `title_tf=1, body_tf=0, tag_tf=0` must not be replaced by an equal sum
+that does not preserve which field contains the occurrence.
 
 ## 5. Integration Responsibilities
 
@@ -177,19 +228,16 @@ The modules have distinct responsibilities:
 - The Inverted Index should consume Forward Index records or an equivalent
   per-document term-frequency mapping containing resolved term IDs and field
   TF values.
-- The Forward Index JSONL record is not directly accepted by the current
-  `InvertedIndex` API. That API's `add_document()` method accepts a
-  `term_frequencies` mapping keyed by integer term IDs, with the shape:
+- `InvertedIndex.build_from_forward_records()` consumes Forward records
+  directly. `InvertedIndex.add_forward_record()` adapts one Forward record;
+  `add_document()` also accepts a `term_frequencies` mapping keyed by integer
+  term IDs, with the shape:
   `{1: {"title_tf": 0, "body_tf": 1, "tag_tf": 0}}`.
-- A dedicated adapter or ingestion method is required to convert a Forward
-  Index record into this expected mapping. The adapter should read the
-  record's `doc_id` and create the integer-keyed TF mapping from its `terms`
-  array. Such an adapter does not yet exist.
 - The Inverted Index must not independently tokenize documents or assign term
   IDs. ID assignment is delegated to the Lexicon, and source-text processing is
   delegated to preprocessing and/or the Forward Index builder.
 
-An integration implementation should therefore provide:
+The integration workflow provides:
 
 1. A finalized Lexicon mapping for the complete corpus.
 2. Forward Index records containing only resolved positive term IDs.
@@ -256,3 +304,14 @@ For this example, one document contains every term, so each Lexicon DF and
 Inverted Index `df` is `1`. In `tree`, repeated body occurrences are counted
 separately, producing `body_tf=2`, and the title/tag occurrences remain
 separate as `title_tf=1` and `tag_tf=1`.
+
+## 7. Full-Dataset Verification
+
+The completed Phase 3 run processed 50,083 documents and 87,183 unique terms.
+The Forward Index contained 4,232,033 term entries, and the Inverted Index
+contained 4,232,033 postings. Exact Forward-to-Inverted consistency, Lexicon
+document frequencies, and the Inverted JSONL save/load round trip passed.
+Measured Inverted construction time was 19.2 seconds; the complete build and
+verification took 159.1 seconds. The Inverted output was 218.84 MiB, and the
+process peak working set was measured at 1,007.5 MiB on that machine. These are
+observations from one run, not guarantees for other hardware or datasets.
