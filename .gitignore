@@ -39,3 +39,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+pyproject.toml
+.python-version
+uv.lock
+
